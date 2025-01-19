@@ -1,0 +1,171 @@
+package com.pisareff.jdbc;
+
+import com.pisareff.jdbc.util.ConnectionManager;
+import org.postgresql.Driver;
+
+import java.sql.*;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+
+import static com.pisareff.jdbc.util.ConnectionManager.open;
+
+public class JdbcRunner {
+    public static void main(String[] args) throws SQLException {
+        demoPrepareStatement();
+    }
+
+    private static void demoMetaData() throws SQLException {
+        try (var connection = ConnectionManager.open();) {
+            var metaData = connection.getMetaData();
+
+            var catalogs = metaData.getCatalogs();
+            while (catalogs.next()){
+                System.out.println(catalogs.getString(1));
+            }
+
+            System.out.println("\n" + "SCHEMAS" + "\n");
+
+            var schemas = metaData.getSchemas();
+            while (schemas.next()) {
+                System.out.println(schemas.getString("TABLE_SCHEM"));
+            }
+
+        }
+    }
+
+    private static void demoPrepareStatement() throws SQLException {
+        var result = getTiketsByFlightId(1L);
+        System.out.println(result);
+
+        var result2 = getFlightsBetween(LocalDate.of(2020, 10, 1).atStartOfDay(), LocalDateTime.now());
+        System.out.println(result2);
+    }
+
+    private static List<Long> getFlightsBetween(LocalDateTime start, LocalDateTime end) throws SQLException {
+        List<Long> result = new ArrayList<>();
+
+        String sql = """
+                SELECT id 
+                FROM flight 
+                WHERE departure_date BETWEEN ? AND ?;
+                """;
+
+        try (var connettion = ConnectionManager.open();
+             var prepareStatement = connettion.prepareStatement(sql)) {
+
+            prepareStatement.setFetchSize(50);
+            prepareStatement.setQueryTimeout(10);
+            prepareStatement.setMaxRows(100);
+
+            System.out.println(prepareStatement + "\n");
+            prepareStatement.setTimestamp(1, Timestamp.valueOf(start));
+            System.out.println(prepareStatement + "\n");
+            prepareStatement.setTimestamp(2, Timestamp.valueOf(end));
+            System.out.println(prepareStatement + "\n");
+
+            var resultSet = prepareStatement.executeQuery();
+
+            while (resultSet.next()) {
+                result.add(resultSet.getLong("id"));
+            }
+
+            return result;
+        }
+    }
+
+    private static List<Long> getTiketsByFlightId(Long flightId) throws SQLException {
+        List<Long> tikets = new ArrayList<>();
+
+        String sql = """
+                SELECT id 
+                FROM ticket 
+                WHERE flight_id = ?;  
+                """;
+
+        try (var connection = ConnectionManager.open();
+             var prepareStatement = connection.prepareStatement(sql)) {
+
+            prepareStatement.setLong(1, flightId);
+
+            var resultSet = prepareStatement.executeQuery();
+
+            while (resultSet.next()) {
+                //tikets.add(resultSet.getLong("id"));                       // NULL - unsafe
+                tikets.add(resultSet.getObject("id", Long.class)); // NULL - safe
+            }
+            return tikets;
+        }
+    }
+
+    private static void demoSqlInjection() throws SQLException {
+
+        String flightId = "2 OR 1 = 1";  // SQL - injection "2 OR 1 = 1; DROP TABLE info" уничтожает таблицу
+        List<Long> tikets = new ArrayList<>();
+
+        String sql = """
+                SELECT id 
+                FROM ticket 
+                WHERE flight_id = %s;
+                """.formatted(flightId);
+
+        try (var connection = ConnectionManager.open();
+             var statement = connection.createStatement()) {
+
+            var resultSet = statement.executeQuery(sql);
+
+            while (resultSet.next()) {
+                //tikets.add(resultSet.getLong("id"));                       // NULL - unsafe
+                tikets.add(resultSet.getObject("id", Long.class)); // NULL - safe
+            }
+
+            System.out.println(tikets);
+
+        }
+    }
+
+    private static void demoSelect() throws SQLException {
+        String sql = """
+                SELECT * 
+                FROM ticket;
+                """;
+
+        try (var connection = open();
+             var statment = connection.createStatement()) {
+
+            System.out.println(connection.getSchema());
+
+            var executeResult = statment.executeQuery(sql);
+            while (executeResult.next()) {
+                System.out.println(executeResult.getLong("id"));
+                System.out.println(executeResult.getString("passenger_no"));
+                System.out.println(executeResult.getBigDecimal("cost"));
+                System.out.println("---------");
+            }
+
+        }
+    }
+
+    private static void demoUpdate() throws SQLException {
+        String sql = """
+                INSERT INTO info (data)
+                VALUES 
+                ('autogenerated');
+                """;
+
+        try (var connection = ConnectionManager.open();
+             var statment = connection.createStatement()) {
+
+            System.out.println(connection.getSchema());
+
+            var executeResult = statment.executeUpdate(sql, Statement.RETURN_GENERATED_KEYS);
+            var generatedKeys = statment.getGeneratedKeys();
+            if (generatedKeys.next()) {
+                var generatedId = generatedKeys.getInt("1");
+                System.out.println(generatedId);
+            }
+
+        }
+    }
+}
